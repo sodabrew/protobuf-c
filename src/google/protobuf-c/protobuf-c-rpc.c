@@ -476,7 +476,7 @@ enqueue_request (ProtobufC_RPC_Client *client,
   protobuf_c_assert (method_index < desc->n_methods);
 
   /* Allocate request_id */
-  protobuf_c_assert (client->state == PROTOBUF_C_CLIENT_STATE_CONNECTED);
+  //protobuf_c_assert (client->state == PROTOBUF_C_CLIENT_STATE_CONNECTED);
   if (client->info.connected.first_free_request_id == 0)
     grow_closure_array (client);
   request_id = client->info.connected.first_free_request_id;

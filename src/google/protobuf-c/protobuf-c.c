@@ -1,19 +1,44 @@
 /* --- protobuf-c.c: public protobuf c runtime implementation --- */
 
 /*
- * Copyright 2008, Dave Benson.
+ * Copyright (c) 2008-2011, Dave Benson.
  * 
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with
- * the License. You may obtain a copy of the License
- * at http://www.apache.org/licenses/LICENSE-2.0 Unless
- * required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on
- * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with
+ * or without modification, are permitted provided that the
+ * following conditions are met:
+ * 
+ * Redistributions of source code must retain the above
+ * copyright notice, this list of conditions and the following
+ * disclaimer.
+
+ * Redistributions in binary form must reproduce
+ * the above copyright notice, this list of conditions and
+ * the following disclaimer in the documentation and/or other
+ * materials provided with the distribution.
+ *
+ * Neither the name
+ * of "protobuf-c" nor the names of its contributors
+ * may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
 
 /* TODO items:
 
@@ -134,9 +159,10 @@ ProtobufCAllocator protobuf_c_default_allocator =
 {
   system_alloc,
   system_free,
-  NULL,
-  8192,
-  NULL
+  NULL,         /* allocator_data */
+  NULL,         /* tmp_alloc */
+  NULL,         /* alloc_unaligned */
+  NULL,         /* unpack_error_handler: use default */
 };
 
 /* Users should NOT modify this structure,
@@ -147,10 +173,12 @@ ProtobufCAllocator protobuf_c_system_allocator =
 {
   system_alloc,
   system_free,
-  NULL,
-  8192,
-  NULL
+  NULL,         /* allocator_data */
+  NULL,         /* tmp_alloc */
+  NULL,         /* alloc_unaligned */
+  NULL,         /* unpack_error_handler: use default */
 };
+
 
 /* === buffer-simple === */
 void
@@ -162,6 +190,7 @@ protobuf_c_buffer_simple_append (ProtobufCBuffer *buffer,
   size_t new_len = simp->len + len;
   if (new_len > simp->alloced)
     {
+      /* Allocate a power-of-two times the current allocation size */
       size_t new_alloced = simp->alloced * 2;
       uint8_t *new_data;
       while (new_alloced < new_len)
@@ -547,7 +576,7 @@ int32_pack (int32_t value, uint8_t *out)
     return uint32_pack (value, out);
 }
 
-/* Pack a 32-bit integer in zigwag encoding. */
+/* Pack a 32-bit integer in zigzag encoding. */
 static inline size_t
 sint32_pack (int32_t value, uint8_t *out)
 {
@@ -1983,6 +2012,14 @@ no_unpacking_needed:
 }
 
 static protobuf_c_boolean
+is_packable_type (ProtobufCType type)
+{
+  return type != PROTOBUF_C_TYPE_STRING
+     &&  type != PROTOBUF_C_TYPE_BYTES
+     &&  type != PROTOBUF_C_TYPE_MESSAGE;
+}
+
+static protobuf_c_boolean
 parse_member (ScannedMember *scanned_member,
               ProtobufCMessage *message,
               ProtobufCAllocator *allocator)
@@ -2007,8 +2044,8 @@ parse_member (ScannedMember *scanned_member,
     case PROTOBUF_C_LABEL_OPTIONAL:
       return parse_optional_member (scanned_member, member, message, allocator);
     case PROTOBUF_C_LABEL_REPEATED:
-      if (field->packed
-       && scanned_member->wire_type == PROTOBUF_C_WIRE_TYPE_LENGTH_PREFIXED)
+      if (scanned_member->wire_type == PROTOBUF_C_WIRE_TYPE_LENGTH_PREFIXED
+       && (field->packed || is_packable_type (field->type)))
         return parse_packed_repeated_member (scanned_member, member, message);
       else
         return parse_repeated_member (scanned_member, member, message, allocator);
@@ -2261,8 +2298,8 @@ protobuf_c_message_unpack         (const ProtobufCMessageDescriptor *desc,
       if (field != NULL && field->label == PROTOBUF_C_LABEL_REPEATED)
         {
           size_t *n = STRUCT_MEMBER_PTR (size_t, rv, field->quantifier_offset);
-          if (field->packed
-           && wire_type == PROTOBUF_C_WIRE_TYPE_LENGTH_PREFIXED)
+          if (wire_type == PROTOBUF_C_WIRE_TYPE_LENGTH_PREFIXED
+           && (field->packed || is_packable_type (field->type)))
             {
               size_t count;
               if (!count_packed_elements (field->type,

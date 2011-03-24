@@ -1,18 +1,42 @@
 /* --- protobuf-c.h: public protobuf c runtime api --- */
 
 /*
- * Copyright 2008, Dave Benson.
+ * Copyright (c) 2008-2011, Dave Benson.
  * 
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with
- * the License. You may obtain a copy of the License
- * at http://www.apache.org/licenses/LICENSE-2.0 Unless
- * required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on
- * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with
+ * or without modification, are permitted provided that the
+ * following conditions are met:
+ * 
+ * Redistributions of source code must retain the above
+ * copyright notice, this list of conditions and the following
+ * disclaimer.
+
+ * Redistributions in binary form must reproduce
+ * the above copyright notice, this list of conditions and
+ * the following disclaimer in the documentation and/or other
+ * materials provided with the distribution.
+ *
+ * Neither the name
+ * of "protobuf-c" nor the names of its contributors
+ * may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef __PROTOBUF_C_RUNTIME_H_
@@ -121,15 +145,51 @@ struct _ProtobufCBinaryData
 
 typedef struct _ProtobufCIntRange ProtobufCIntRange; /* private */
 
+typedef struct _ProtobufCMessageDescriptor ProtobufCMessageDescriptor;
+
+typedef enum
+{
+  PROTOBUF_C_ERROR_CODE_UNPACK_TRUNCATED,
+  PROTOBUF_C_ERROR_CODE_UNPACK_BAD_VARINT,
+  PROTOBUF_C_ERROR_CODE_UNPACK_BAD_PACKED_REPEATED_TYPE,
+  PROTOBUF_C_ERROR_CODE_UNPACK_BAD_TYPE,
+  PROTOBUF_C_ERROR_CODE_UNPACK_UNSUPPORTED_TAG,
+  PROTOBUF_C_ERROR_CODE_UNPACK_MISSING_REQUIRED
+} ProtobufCErrorCode;
+
+#define PROTOBUF_C_UNPACK_ERROR_STACK_SIZE   16
+typedef struct _ProtobufCErrorStackNode ProtobufCErrorStackNode;
+typedef struct _ProtobufCUnpackErrorInfo ProtobufCUnpackErrorInfo;
+struct _ProtobufCErrorStackNode
+{
+  const ProtobufCMessageDescriptor *message;
+  unsigned field_number;
+};
+struct _ProtobufCUnpackErrorInfo
+{
+  const char *message;
+  ProtobufCErrorCode code;
+  unsigned message_stack_depth;
+  ProtobufCErrorStackNode error_stack[PROTOBUF_C_UNPACK_ERROR_STACK_SIZE];
+};
+
 /* --- memory management --- */
 typedef struct _ProtobufCAllocator ProtobufCAllocator;
 struct _ProtobufCAllocator
 {
-  void *(*alloc)(void *allocator_data, size_t size);
+  void *(*alloc)(void *allocator_data, size_t size, unsigned alignment);
   void (*free)(void *allocator_data, void *pointer);
-  void *(*tmp_alloc)(void *allocator_data, size_t size);
-  unsigned max_alloca;
+
   void *allocator_data;
+
+  /* optional (if NULL): routines whose data will be automatically
+     freed at the end of the current operation */
+  void *(*tmp_alloc)(void *allocator_data, size_t size);
+
+  /* optional: function to call with information about
+     how unpacking failed. By default, prints the error message to stderr. */
+  void (*unpack_error_handler)(void *allocator_data,
+                               const ProtobufCUnpackErrorInfo *info);
 };
 
 /* This is a configurable allocator.
@@ -223,7 +283,6 @@ struct _ProtobufCEnumDescriptor
 };
 
 /* --- messages --- */
-typedef struct _ProtobufCMessageDescriptor ProtobufCMessageDescriptor;
 typedef struct _ProtobufCFieldDescriptor ProtobufCFieldDescriptor;
 typedef struct _ProtobufCMessage ProtobufCMessage;
 typedef void (*ProtobufCMessageInit)(ProtobufCMessage *);

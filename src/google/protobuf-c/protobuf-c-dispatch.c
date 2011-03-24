@@ -1,3 +1,42 @@
+/*
+ * Copyright (c) 2008-2011, Dave Benson.
+ * 
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with
+ * or without modification, are permitted provided that the
+ * following conditions are met:
+ * 
+ * Redistributions of source code must retain the above
+ * copyright notice, this list of conditions and the following
+ * disclaimer.
+
+ * Redistributions in binary form must reproduce
+ * the above copyright notice, this list of conditions and
+ * the following disclaimer in the documentation and/or other
+ * materials provided with the distribution.
+ *
+ * Neither the name
+ * of "protobuf-c" nor the names of its contributors
+ * may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 /* NOTE: this may not work very well on windows, where i'm
    not sure that "SOCKETs" are allocated nicely like
    file-descriptors are */
@@ -98,6 +137,7 @@ struct _RealDispatch
   FDMapNode *fd_map_tree;       /* map indexed by fd */
 #endif
 
+  protobuf_c_boolean is_dispatching;
 
   ProtobufCDispatchTimer *timer_tree;
   ProtobufCAllocator *allocator;
@@ -193,8 +233,10 @@ ProtobufCDispatch *protobuf_c_dispatch_new (ProtobufCAllocator *allocator)
   rv->allocator = allocator;
   rv->timer_tree = NULL;
   rv->first_idle = rv->last_idle = NULL;
+  rv->has_idle = 0;
   rv->recycled_idles = NULL;
   rv->recycled_timeouts = NULL;
+  rv->is_dispatching = 0;
 
   /* need to handle SIGPIPE more gracefully than default */
   signal (SIGPIPE, SIG_IGN);
@@ -531,6 +573,13 @@ protobuf_c_dispatch_dispatch (ProtobufCDispatch *dispatch,
   unsigned i;
   FDMap *fd_map = d->fd_map;
   struct timeval tv;
+
+  /* Re-entrancy guard.  If this is triggerred, then
+     you are calling protobuf_c_dispatch_dispatch (or _run)
+     from a callback function.  That's not allowed. */
+  protobuf_c_assert (!d->is_dispatching);
+  d->is_dispatching = 1;
+
   fd_max = 0;
   for (i = 0; i < n_notifies; i++)
     if (fd_max < (unsigned) notifies[i].fd)
@@ -604,6 +653,9 @@ protobuf_c_dispatch_dispatch (ProtobufCDispatch *dispatch,
     }
   if (d->timer_tree == NULL)
     d->base.has_timeout = 0;
+
+  /* Finish reentrance guard. */
+  d->is_dispatching = 0;
 }
 
 void
@@ -717,7 +769,6 @@ protobuf_c_dispatch_run (ProtobufCDispatch *dispatch)
         if (events[n_events].events != 0)
           n_events++;
       }
-  protobuf_c_dispatch_clear_changes (dispatch);
   protobuf_c_dispatch_dispatch (dispatch, n_events, events);
   if (to_free)
     FREE (to_free);
